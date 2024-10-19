@@ -95,7 +95,8 @@ module.exports = class SyncPlugin {
         return Date.now() - this.lastSyncTime >= 10 * 60 * 1000;
     }
 
-    saveSettings(syncDelay, autoSyncEnabled, isMaster) {
+    saveSettings(serverURL, syncDelay, autoSyncEnabled, isMaster) {
+        this.settings.serverURL = serverURL;
         this.syncDelay = parseInt(syncDelay);
         this.autoSyncEnabled = autoSyncEnabled;
         this.isMaster = isMaster;
@@ -118,10 +119,11 @@ module.exports = class SyncPlugin {
 
         const saveButton = this.createElement("button", { style: "width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; margin-bottom: 10px; cursor: pointer;", textContent: "Save Settings" });
         saveButton.onclick = () => {
+            const serverURL = panel.querySelector("#serverURL").value;  // Capture the server URL
             const syncDelay = panel.querySelector("#syncDelay").value;
             const autoSyncEnabled = panel.querySelector("#autoSyncEnabled").checked;
             const isMaster = panel.querySelector("#isMaster").checked;
-            this.saveSettings(syncDelay, autoSyncEnabled, isMaster);
+            this.saveSettings(serverURL, syncDelay, autoSyncEnabled, isMaster);  // Pass the serverURL to saveSettings
             if (this.monitorInterval) clearInterval(this.monitorInterval);
             this.autoSyncEnabled && (this.isMaster ? this.startPluginMonitoring() : this.syncFromServer());
             BdApi.showToast("Settings saved!", { type: "success" });
