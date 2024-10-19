@@ -1,6 +1,6 @@
 /**
  * @name SyncPlugin
- * @version 0.6.2
+ * @version 0.6.3
  * @description Sync your BetterDiscord plugins across devices using a backend with authentication and background monitoring.
  * @author Mikka
  * @authorId 390527881891151872
@@ -13,7 +13,7 @@
 const config = {
     info: {
         name: "SyncPlugin",
-        version: "0.6.2",
+        version: "0.6.3",
     },
     defaultConfig: [
         { type: "textbox", id: "serverURL", name: "Backend URL", note: "Enter the URL of your self-hosted sync backend.", value: "https://pet.pm" },
@@ -29,13 +29,20 @@ module.exports = class SyncPlugin {
         this.token = BdApi.loadData(config.info.name, "token") || null;
         this.lastSyncTime = BdApi.loadData(config.info.name, "lastSyncTime") || 0;
         this.syncDelay = this.settings.syncDelay || 60000;
-        this.autoSyncEnabled = this.settings.autoSyncEnabled || true;
+        this.autoSyncEnabled = this.settings.autoSyncEnabled !== undefined ? this.settings.autoSyncEnabled : true;
         this.isMaster = this.settings.isMaster !== undefined ? this.settings.isMaster : true;
         this.pluginIndex = {};
     }
 
     load() {
         BdApi.showToast(`${config.info.name} loaded!`);
+        const VERSION = config.info.version;
+        console.info("%c >.< %c Initialized running %c" + VERSION + "%c https://github.com/pet-pm/sync-plugin", 
+            "color: #fff; background: #CF9FFF; padding: 5px 0; margin: 1em 0;", 
+            "color: #000; padding: 5px 0;", 
+            "color: #CF9FFF; text-decoration: underline;", 
+            "margin: 1em 0; padding: 5px 0; background: #efefef;"
+        );
     }
 
     start() {
@@ -57,37 +64,7 @@ module.exports = class SyncPlugin {
         const pluginsFolder = BdApi.Plugins.folder;
 
         this.monitorInterval = setInterval(async () => {
-            const pluginFiles = fs.readdirSync(pluginsFolder).filter(file => file.endsWith(".plugin.js"));
-            let syncedPlugins = 0;
-
-            for (const file of pluginFiles) {
-                const filePath = path.join(pluginsFolder, file);
-                const lastModified = fs.statSync(filePath).mtime.getTime();
-
-                // Upload plugin if it's new or modified
-                if (!this.pluginIndex[file] || this.pluginIndex[file] !== lastModified) {
-                    const uploadSuccess = await this.uploadPlugin(file, fs.readFileSync(filePath));
-                    if (uploadSuccess) {
-                        this.pluginIndex[file] = lastModified;
-                        syncedPlugins++;
-                    }
-                }
-            }
-
-            // Check for deleted plugins
-            for (const file in this.pluginIndex) {
-                if (!pluginFiles.includes(file)) {
-                    const deleteSuccess = await this.deletePlugin(file);
-                    if (deleteSuccess) {
-                        delete this.pluginIndex[file];
-                        syncedPlugins++;
-                    }
-                }
-            }
-
-            if (syncedPlugins > 0) {
-                BdApi.showToast(`Synced ${syncedPlugins} plugin(s)`, { type: "success" });
-            }
+            await this.syncPlugins();
         }, this.syncDelay);
     }
 
@@ -97,8 +74,11 @@ module.exports = class SyncPlugin {
 
     saveSettings(serverURL, syncDelay, autoSyncEnabled, isMaster) {
         this.settings.serverURL = serverURL;
-        this.syncDelay = parseInt(syncDelay);
+        this.settings.syncDelay = parseInt(syncDelay);
+        this.syncDelay = this.settings.syncDelay;
+        this.settings.autoSyncEnabled = autoSyncEnabled;
         this.autoSyncEnabled = autoSyncEnabled;
+        this.settings.isMaster = isMaster;
         this.isMaster = isMaster;
         BdApi.saveData(config.info.name, "settings", this.settings);
     }
@@ -113,17 +93,17 @@ module.exports = class SyncPlugin {
     getSettingsPanel() {
         const panel = this.createElement("div", { style: "padding: 10px" });
         const serverUrlDiv = this.createElement("div", {}, `<label style="font-weight: bold;">Backend URL:</label><input type="text" id="serverURL" value="${this.settings.serverURL || ''}" style="width: 100%; padding: 5px; margin-bottom: 10px;" />`);
-        const syncDelayDiv = this.createElement("div", {}, `<label style="font-weight: bold;">Sync Delay (ms):</label><input type="number" id="syncDelay" value="${this.syncDelay}" style="width: 100%; padding: 5px; margin-bottom: 10px;" />`);
-        const autoSyncDiv = this.createElement("div", {}, `<label style="font-weight: bold;"><span style='color: white;'>Enable Auto Sync</span></label><input type="checkbox" id="autoSyncEnabled" ${this.autoSyncEnabled ? "checked" : ""} />`);
-        const masterSlaveDiv = this.createElement("div", {}, `<label style="font-weight: bold;"><span style='color: white;'>Sync To Server (Master)</span></label><input type="checkbox" id="isMaster" ${this.isMaster ? "checked" : ""} />`);
+        const syncDelayDiv = this.createElement("div", {}, `<label style="font-weight: bold;">Sync Delay (ms):</label><input type="number" id="syncDelay" value="${this.settings.syncDelay || 60000}" style="width: 100%; padding: 5px; margin-bottom: 10px;" />`);
+        const autoSyncDiv = this.createElement("div", {}, `<label style="font-weight: bold;"><span style='color: white;'>Enable Auto Sync</span></label><input type="checkbox" id="autoSyncEnabled" ${this.settings.autoSyncEnabled ? "checked" : ""} />`);
+        const masterSlaveDiv = this.createElement("div", {}, `<label style="font-weight: bold;"><span style='color: white;'>Sync To Server (Master)</span></label><input type="checkbox" id="isMaster" ${this.settings.isMaster ? "checked" : ""} />`);
 
         const saveButton = this.createElement("button", { style: "width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; margin-bottom: 10px; cursor: pointer;", textContent: "Save Settings" });
         saveButton.onclick = () => {
-            const serverURL = panel.querySelector("#serverURL").value;  // Capture the server URL
+            const serverURL = panel.querySelector("#serverURL").value;
             const syncDelay = panel.querySelector("#syncDelay").value;
             const autoSyncEnabled = panel.querySelector("#autoSyncEnabled").checked;
             const isMaster = panel.querySelector("#isMaster").checked;
-            this.saveSettings(serverURL, syncDelay, autoSyncEnabled, isMaster);  // Pass the serverURL to saveSettings
+            this.saveSettings(serverURL, syncDelay, autoSyncEnabled, isMaster);
             if (this.monitorInterval) clearInterval(this.monitorInterval);
             this.autoSyncEnabled && (this.isMaster ? this.startPluginMonitoring() : this.syncFromServer());
             BdApi.showToast("Settings saved!", { type: "success" });
@@ -156,7 +136,11 @@ module.exports = class SyncPlugin {
         form.querySelector("#submitLogin").onclick = async () => {
             const userId = form.querySelector("#userId").value;
             const password = form.querySelector("#password").value;
-            userId && password ? await this.submitLogin(userId, password) : BdApi.showToast("User ID and Password cannot be empty", { type: "error" });
+            if (userId && password) {
+                await this.submitLogin(userId, password);
+            } else {
+                BdApi.showToast("User ID and Password cannot be empty", { type: "error" });
+            }
         };
         return form;
     }
@@ -175,7 +159,10 @@ module.exports = class SyncPlugin {
                 BdApi.saveData(config.info.name, "token", this.token);
                 this.reloadSettingsPanel();
                 this.autoSyncEnabled && (this.isMaster ? this.startPluginMonitoring() : this.syncFromServer());
-            } else BdApi.showToast(data.error || "Login failed!", { type: "error" });
+                BdApi.showToast(data.message || "Login successful!", { type: "success" });
+            } else {
+                BdApi.showToast(data.error || "Login failed!", { type: "error" });
+            }
         } catch (error) {
             BdApi.showToast("Failed to connect to the server", { type: "error" });
         }
@@ -223,24 +210,35 @@ module.exports = class SyncPlugin {
         const path = require("path");
         const pluginsFolder = BdApi.Plugins.folder;
         const pluginFiles = fs.readdirSync(pluginsFolder).filter(f => f.endsWith(".plugin.js"));
+        let syncedPlugins = 0;
 
-        const updatePluginIndex = async (file, modified) => {
-            const uploadSuccess = await this.uploadPlugin(file, fs.readFileSync(file));
-            if (uploadSuccess) this.pluginIndex[file] = modified;
-        };
-
+        // Upload new or modified plugins
         for (const file of pluginFiles) {
             const filePath = path.join(pluginsFolder, file);
             const lastModified = fs.statSync(filePath).mtime.getTime();
-            (!this.pluginIndex[file] || this.pluginIndex[file] !== lastModified) && (await updatePluginIndex(filePath, lastModified));
+            if (!this.pluginIndex[file] || this.pluginIndex[file] !== lastModified) {
+                const uploadSuccess = await this.uploadPlugin(file, fs.readFileSync(filePath));
+                if (uploadSuccess) {
+                    this.pluginIndex[file] = lastModified;
+                    syncedPlugins++;
+                }
+            }
         }
 
-        const deletedPlugins = Object.keys(this.pluginIndex).filter(f => !pluginFiles.includes(f));
-        for (const file of deletedPlugins) {
-            (await this.deletePlugin(file)) && delete this.pluginIndex[file];
+        // Delete removed plugins
+        for (const file in this.pluginIndex) {
+            if (!pluginFiles.includes(file)) {
+                const deleteSuccess = await this.deletePlugin(file);
+                if (deleteSuccess) {
+                    delete this.pluginIndex[file];
+                    syncedPlugins++;
+                }
+            }
         }
 
-        BdApi.showToast("Sync complete", { type: "success" });
+        if (syncedPlugins > 0) {
+            BdApi.showToast(`Synced ${syncedPlugins} plugin(s)`, { type: "success" });
+        }
     }
 
     async syncFromServer() {
@@ -250,15 +248,17 @@ module.exports = class SyncPlugin {
         const plugins = await this.fetchData("plugins");
 
         if (!plugins) return;
+
         for (const plugin of plugins) {
-            const filePath = path.join(pluginsFolder, plugin.key.split("/").pop());
-            const res = await fetch(`${this.settings.serverURL}/protected/download-plugin?fileName=${plugin.key}`, {
+            const fileName = plugin.key.split("/").pop();
+            const filePath = path.join(pluginsFolder, fileName);
+            const response = await fetch(`${this.settings.serverURL}/protected/download-plugin?fileName=${encodeURIComponent(fileName)}`, {
                 headers: { Authorization: `Bearer ${this.token}` },
             });
-            if (res.ok) {
-                const fileData = await res.arrayBuffer();
+            if (response.ok) {
+                const fileData = await response.arrayBuffer();
                 fs.writeFileSync(filePath, Buffer.from(fileData));
-                BdApi.showToast(`Downloaded ${plugin.key}`, { type: "success" });
+                BdApi.showToast(`Downloaded ${fileName}`, { type: "success" });
             }
         }
     }
@@ -266,13 +266,19 @@ module.exports = class SyncPlugin {
     async uploadPlugin(fileName, fileData) {
         try {
             const formData = new FormData();
-            formData.append("file", new File([fileData], fileName));
+            formData.append("file", new Blob([fileData]), fileName);
             const res = await fetch(`${this.settings.serverURL}/protected/upload-plugin`, {
                 method: "POST",
                 headers: { Authorization: `Bearer ${this.token}` },
                 body: formData,
             });
-            return res.ok;
+            if (res.ok) {
+                return true;
+            } else {
+                const errorData = await res.json();
+                BdApi.showToast(`Failed to upload ${fileName}: ${errorData.error}`, { type: "error" });
+                return false;
+            }
         } catch (error) {
             BdApi.showToast(`Error uploading ${fileName}: ${error.message}`, { type: "error" });
             return false;
@@ -283,10 +289,19 @@ module.exports = class SyncPlugin {
         try {
             const res = await fetch(`${this.settings.serverURL}/protected/delete-plugin`, {
                 method: "DELETE",
-                headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    "Content-Type": "application/json",
+                },
                 body: JSON.stringify({ fileName }),
             });
-            return res.ok;
+            if (res.ok) {
+                return true;
+            } else {
+                const errorData = await res.json();
+                BdApi.showToast(`Failed to delete ${fileName}: ${errorData.error}`, { type: "error" });
+                return false;
+            }
         } catch (error) {
             BdApi.showToast(`Error deleting ${fileName}: ${error.message}`, { type: "error" });
             return false;
@@ -295,6 +310,9 @@ module.exports = class SyncPlugin {
 
     reloadSettingsPanel() {
         const panel = document.querySelector(".bd-settings .settings-right .plugin-settings");
-        if (panel) panel.innerHTML = "", panel.appendChild(this.getSettingsPanel());
+        if (panel) {
+            panel.innerHTML = "";
+            panel.appendChild(this.getSettingsPanel());
+        }
     }
 };
